@@ -12,7 +12,7 @@ const crypto = require('crypto');
 const path = require('path');
 
 const PORT = process.env.PORT || 3000;
-const SITE_NAME = process.env.SITE_NAME || 'JobBoard';
+const SITE_NAME = process.env.SITE_NAME || 'MonitorMyWork';
 const ADMIN_PATH = process.env.ADMIN_PATH || '/4A2B-9X7D-W3R8-55K2';
 const ADMIN_PASSWORD = process.env.ADMIN_PASSWORD || 'changeme';
 const SECRET = process.env.SESSION_SECRET || 'change-this-secret';
@@ -46,6 +46,9 @@ app.use(express.urlencoded({ extended: false, limit: '200kb' }));
 
 // ---------- helpers ----------
 const esc = (s = '') => String(s).replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
+const BRAND_NAME_HTML = SITE_NAME === 'MonitorMyWork'
+  ? '<span>Monitor</span><span class="brand-my">My</span><span class="brand-work">Work</span>'
+  : `<span>${esc(SITE_NAME)}</span>`;
 const slugify = s => s.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '').slice(0, 60);
 const baseUrl = req => `${req.protocol}://${req.get('host')}`;
 const sign = v => crypto.createHmac('sha256', SECRET).update(v).digest('hex');
@@ -84,14 +87,15 @@ const layout = (title, body, { noindex = false, desc = '', sides = false, active
 <title>${esc(title)}</title>
 ${desc ? `<meta name="description" content="${esc(desc)}">` : ''}
 ${noindex ? '<meta name="robots" content="noindex,nofollow">' : ''}
-<meta name="theme-color" content="#18283f">
+<meta name="theme-color" content="#102e4e">
+<link rel="icon" type="image/svg+xml" href="/favicon.svg">
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link href="https://fonts.googleapis.com/css2?family=DM+Sans:wght@400;500;600;700&family=Newsreader:opsz,wght@6..72,500;6..72,600&display=swap" rel="stylesheet">
 ${ADSENSE_CLIENT ? `<script async src="https://pagead2.googlesyndication.com/pagead/js/adsbygoogle.js?client=${esc(ADSENSE_CLIENT)}" crossorigin="anonymous"></script>` : ''}
 <style>
 *{box-sizing:border-box}
-:root{color-scheme:light;--ink:#18283f;--ink-soft:#425873;--paper:#f5f7fa;--surface:#fff;--line:#dbe3ed;--muted:#68788c;--accent:#1f6feb;--accent-dark:#1557b0;--accent-soft:#eaf2ff;--highlight:#f6b544;--shadow:0 16px 36px rgba(24,40,63,.08);--sans:'DM Sans',system-ui,sans-serif;--serif:'Newsreader',Georgia,serif}
+:root{color-scheme:light;--ink:#102e4e;--ink-soft:#3b5c75;--paper:#f5f9fc;--surface:#fff;--line:#d9e6ef;--muted:#64798b;--accent:#087bea;--accent-dark:#0066bd;--accent-soft:#e7f5f3;--highlight:#00b889;--shadow:0 16px 36px rgba(16,46,78,.09);--sans:'DM Sans',system-ui,sans-serif;--serif:'Newsreader',Georgia,serif}
 html{scroll-behavior:smooth}
 body{margin:0;font:16px/1.65 var(--sans);color:var(--ink);background:var(--paper)}
 a{color:var(--ink);text-underline-offset:3px}
@@ -100,13 +104,16 @@ a:focus-visible,button:focus-visible,input:focus-visible,textarea:focus-visible,
 .wrap{width:min(1160px,100%);margin:0 auto;padding:0 26px}
 header{background:var(--surface);border-bottom:1px solid var(--line)}
 header .wrap{min-height:78px;display:flex;align-items:center;justify-content:space-between;gap:24px}
-.brand{display:flex;align-items:center;gap:11px;min-width:0;color:var(--ink);font-weight:700;font-size:18px;letter-spacing:-.035em;text-decoration:none}
-.brand-mark{width:34px;height:34px;border:1px solid #b9c9dc;background:var(--accent-soft);border-radius:10px;display:grid;place-items:center;font-family:var(--serif);font-size:20px;color:var(--ink)}
+.brand{display:flex;align-items:center;gap:11px;min-width:0;text-decoration:none}
+.brand-logo{display:block;width:46px;height:42px;flex:none;object-fit:contain}
+.brand-name{display:flex;align-items:baseline;font-size:24px;font-weight:700;line-height:1;letter-spacing:0;white-space:nowrap}
+.brand-my{color:var(--accent)}
+.brand-work{color:#00a987}
 .nav{display:flex;align-items:center;gap:8px}
 .nav a{border-radius:8px;padding:9px 13px;color:var(--ink-soft);font-size:14px;font-weight:600;text-decoration:none;transition:background .18s ease,color .18s ease}
 .nav a:hover,.nav a[aria-current=page]{background:var(--accent-soft);color:var(--ink)}
-.nav .nav-cta{background:var(--ink);color:#fff}
-.nav .nav-cta:hover{background:#263d5c;color:#fff}
+.nav .nav-cta{background:var(--accent);color:#fff}
+.nav .nav-cta:hover{background:var(--accent-dark);color:#fff}
 .page{width:min(1160px,100%);margin:0 auto;display:flex;align-items:flex-start;gap:34px;padding:48px 26px 76px}
 .content{width:100%;max-width:850px;min-width:0;margin:0 auto}
 .rail{display:none}
@@ -118,7 +125,7 @@ h3{font-size:17px;line-height:1.4;margin:0}
 .eyebrow{font-size:11px;font-weight:700;letter-spacing:.16em;text-transform:uppercase;color:var(--accent-dark)}
 .lead{max-width:650px;color:var(--muted);font-size:18px;line-height:1.65;margin:0}
 .page-heading{margin-bottom:30px}
-.hero{position:relative;overflow:hidden;background:linear-gradient(118deg,#18283f 0%,#263e5d 100%);color:#f8fbff;border-radius:20px;padding:clamp(30px,6vw,66px);margin-bottom:48px;box-shadow:var(--shadow)}
+.hero{position:relative;overflow:hidden;background:linear-gradient(118deg,#102e4e 0%,#075a86 58%,#00816f 100%);color:#f8fbff;border-radius:20px;padding:clamp(30px,6vw,66px);margin-bottom:48px;box-shadow:var(--shadow)}
 .hero:after{content:"";position:absolute;width:310px;height:310px;right:-78px;top:-110px;border:1px solid rgba(198,219,247,.32);border-radius:50%;box-shadow:0 0 0 26px rgba(198,219,247,.08),0 0 0 54px rgba(198,219,247,.05);pointer-events:none}
 .hero .eyebrow{color:#a9cbff;margin-bottom:17px}
 .hero h1{max-width:690px;font-size:clamp(40px,6.5vw,72px);margin-bottom:18px}
@@ -127,8 +134,8 @@ h3{font-size:17px;line-height:1.4;margin:0}
 .hero-note{font-size:13px;color:#c9d8ea}
 .btn{display:inline-flex;align-items:center;justify-content:center;gap:9px;background:var(--accent);color:#fff;border:1px solid var(--accent);border-radius:8px;padding:12px 20px;font:600 15px/1.3 var(--sans);text-decoration:none;cursor:pointer;transition:transform .18s ease,background .18s ease,border-color .18s ease}
 .btn:hover{background:var(--accent-dark);border-color:var(--accent-dark);color:#fff;transform:translateY(-1px)}
-.btn-secondary{background:transparent;color:var(--ink);border-color:#aebed0}
-.btn-secondary:hover{background:var(--accent-soft);color:var(--ink);border-color:#8eabca}
+.btn-secondary{background:transparent;color:var(--accent-dark);border-color:var(--accent)}
+.btn-secondary:hover{background:var(--accent-soft);color:var(--accent-dark);border-color:var(--accent-dark)}
 .btn[aria-disabled=true]{background:#9baabd;border-color:#9baabd;pointer-events:none}
 .section-head{display:flex;align-items:end;justify-content:space-between;gap:20px;margin:0 0 17px}
 .section-head h2{margin:0}
@@ -202,6 +209,8 @@ label{display:block;margin:16px 0 5px;font-weight:700;font-size:14px}
 input,textarea,select{width:100%;padding:11px 12px;border:1px solid #b9c8d9;border-radius:8px;background:var(--surface);color:var(--ink);font:inherit}
 textarea{min-height:200px}
 button{font-family:inherit}
+button:not(.btn){background:var(--accent);color:#fff;border:1px solid var(--accent);border-radius:8px;padding:8px 12px;font:600 13px/1.3 var(--sans);cursor:pointer;transition:background .18s ease,border-color .18s ease}
+button:not(.btn):hover{background:var(--accent-dark);border-color:var(--accent-dark)}
 footer{border-top:1px solid var(--line);background:#edf1f6;padding:24px 0;font-size:13px;color:var(--muted)}
 footer .wrap{display:flex;justify-content:space-between;align-items:center;gap:16px;flex-wrap:wrap}
 footer a{color:var(--ink-soft)}
@@ -210,12 +219,12 @@ footer a{color:var(--ink-soft)}
 .not-found{padding:22px 0 10px}
 .not-found .lead{margin-bottom:22px}
 @media(max-width:1000px){.filter-grid{grid-template-columns:repeat(3,1fr)}}
-@media(max-width:767px){.wrap{padding:0 18px}header .wrap{min-height:70px;gap:10px}.brand{font-size:16px}.brand-mark{width:31px;height:31px}.nav{gap:2px}.nav a{padding:8px 9px;font-size:12px}.page{padding:30px 18px 54px}.hero{border-radius:15px;margin-bottom:38px}.hero:after{right:-170px}.hero .lead{font-size:16px}.job-card-top{display:block}.job-type{margin-top:12px}.card{padding:18px}.section-head{align-items:flex-start}.section-head h2{font-size:26px}.job-facts{gap:8px}.job-facts div{flex:1 1 42%}.apply-panel{align-items:flex-start;padding:19px}.apply-panel .btn{width:100%}.filter-grid{grid-template-columns:1fr}.filter-actions{align-items:flex-start;flex-direction:column}.filter-actions .btn{width:100%}.stat-grid,.feature-grid,.step-grid{grid-template-columns:1fr}.home-cta{align-items:flex-start;flex-direction:column;padding:22px}.home-cta .btn{width:100%}}
+@media(max-width:767px){.wrap{padding:0 18px}header .wrap{min-height:70px;gap:10px}.brand{gap:8px}.brand-logo{width:38px;height:36px}.brand-name{font-size:21px}.nav{gap:2px}.nav a{padding:8px 9px;font-size:12px}.page{padding:30px 18px 54px}.hero{border-radius:15px;margin-bottom:38px}.hero:after{right:-170px}.hero .lead{font-size:16px}.job-card-top{display:block}.job-type{margin-top:12px}.card{padding:18px}.section-head{align-items:flex-start}.section-head h2{font-size:26px}.job-facts{gap:8px}.job-facts div{flex:1 1 42%}.apply-panel{align-items:flex-start;padding:19px}.apply-panel .btn{width:100%}.filter-grid{grid-template-columns:1fr}.filter-actions{align-items:flex-start;flex-direction:column}.filter-actions .btn{width:100%}.stat-grid,.feature-grid,.step-grid{grid-template-columns:1fr}.home-cta{align-items:flex-start;flex-direction:column;padding:22px}.home-cta .btn{width:100%}}
 @media(max-width:390px){header .wrap{align-items:flex-start;padding-top:13px;padding-bottom:13px;flex-direction:column}.nav{width:100%}.nav a{flex:1;text-align:center}.hero-actions .btn{width:100%}}
 @media(prefers-reduced-motion:reduce){html{scroll-behavior:auto}*,*:before,*:after{transition:none!important}}
 </style></head><body>
 <header><div class="wrap">
-  <a class="brand" href="/" aria-label="${esc(SITE_NAME)} home"><span class="brand-mark" aria-hidden="true">${esc(SITE_NAME.slice(0, 1).toUpperCase())}</span><span>${esc(SITE_NAME)}</span></a>
+  <a class="brand" href="/" aria-label="${esc(SITE_NAME)} home"><img class="brand-logo" src="/logo.png" width="46" height="42" alt=""><span class="brand-name">${BRAND_NAME_HTML}</span></a>
   <nav class="nav" aria-label="Primary navigation"><a href="/"${active === 'home' ? ' aria-current="page"' : ''}>Home</a><a class="nav-cta" href="/jobs"${active === 'jobs' ? ' aria-current="page"' : ''}>Browse jobs</a></nav>
 </div></header>
 <main class="page">${sides ? `<aside class="rail" aria-label="Advertisement">${sideAd()}</aside>` : ''}<div class="content">${body}</div></main>
@@ -386,7 +395,9 @@ app.get('/ads.txt', (req, res) => ADSENSE_CLIENT
   ? res.type('text').send(`google.com, ${ADSENSE_CLIENT.replace(/^ca-/, '')}, DIRECT, f08c47fec0942fa0\n`)
   : res.status(404).send('Not found'));
 
-app.get('/favicon.ico', (req, res) => res.status(204).end());
+app.get('/logo.png', (req, res) => res.sendFile(path.join(__dirname, 'logo.png')));
+app.get('/favicon.svg', (req, res) => res.type('image/svg+xml').sendFile(path.join(__dirname, 'favicon.svg')));
+app.get('/favicon.ico', (req, res) => res.redirect('/favicon.svg'));
 app.get('/robots.txt', (req, res) => res.type('text').send(`User-agent: *\nDisallow: ${ADMIN_PATH}\nDisallow: /apply/\nSitemap: ${baseUrl(req)}/sitemap.xml\n`));
 app.get('/sitemap.xml', (req, res) => {
   const b = baseUrl(req);
