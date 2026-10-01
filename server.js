@@ -19,7 +19,7 @@ const SECRET = process.env.SESSION_SECRET || 'change-this-secret';
 const ADSENSE_CLIENT = process.env.ADSENSE_CLIENT || ''; // e.g. ca-pub-1234567890123456
 const ADSENSE_SLOT = process.env.ADSENSE_SLOT || '';     // ad unit slot id
 const ADSENSE_SIDE_SLOT = process.env.ADSENSE_SIDE_SLOT || ''; // 160x600 side ad unit slot id
-const APPLY_WAIT_SECONDS = Number(process.env.APPLY_WAIT_SECONDS || 8);
+// const APPLY_WAIT_SECONDS = Number(process.env.APPLY_WAIT_SECONDS || 8);
 const DB_PATH = process.env.DB_PATH || path.join(__dirname, 'jobs.db');
 
 const db = new Database(DB_PATH);
@@ -352,27 +352,27 @@ app.get('/job/:slug', (req, res) => {
     ${adUnit()}
     <section class="description"><h2>Job details</h2>${paragraphs(j.description)}</section>
     ${adUnit()}
-    <section class="apply-panel" aria-label="Apply for this position"><div><h2>Interested in this role?</h2><p>Review the details, then continue to the employer's application page.</p></div><a class="btn" href="/apply/${esc(j.slug)}" rel="nofollow">Apply now</a></section>`,
+    <section class="apply-panel" aria-label="Apply for this position"><div><h2>Interested in this role?</h2><p>Review the details, then continue directly to the employer's application page.</p></div><a class="btn" href="${esc(j.apply_url)}" target="_blank" rel="nofollow noopener noreferrer">Apply now</a></section>`,
     { desc: `${j.title} at ${j.company}${j.location ? ' in ' + j.location : ''}. Read the details and apply.`, sides: true }));
 });
 
-// Ads page shown before redirecting to the real apply link
-app.get('/apply/:slug', (req, res) => {
-  const j = db.prepare('SELECT * FROM jobs WHERE slug = ?').get(req.params.slug);
-  if (!j) return fallbackPage(res);
-  res.send(layout(`Apply: ${j.title}`,
-    `<h1>Apply for ${esc(j.title)}</h1>
-    <p>${esc(j.company)}</p>
-    ${adUnit()}
-    <p><a id="go" class="btn" aria-disabled="true" href="${esc(j.apply_url)}" rel="nofollow noopener">Continue to application (<span id="n">${APPLY_WAIT_SECONDS}</span>)</a></p>
-    ${adUnit()}
-    <p><a href="/job/${esc(j.slug)}">&larr; Back to job details</a></p>
-    <script>
-    var n=${APPLY_WAIT_SECONDS},go=document.getElementById('go');
-    var t=setInterval(function(){n--;if(n<=0){clearInterval(t);go.removeAttribute('aria-disabled');go.textContent='Continue to application';}else{document.getElementById('n').textContent=n;}},1000);
-    </script>`,
-    { noindex: true, sides: true }));
-});
+// // Ads page shown before redirecting to the real apply link
+// app.get('/apply/:slug', (req, res) => {
+//   const j = db.prepare('SELECT * FROM jobs WHERE slug = ?').get(req.params.slug);
+//   if (!j) return fallbackPage(res);
+//   res.send(layout(`Apply: ${j.title}`,
+//     `<h1>Apply for ${esc(j.title)}</h1>
+//     <p>${esc(j.company)}</p>
+//     ${adUnit()}
+//     <p><a id="go" class="btn" aria-disabled="true" href="${esc(j.apply_url)}" rel="nofollow noopener">Continue to application (<span id="n">${APPLY_WAIT_SECONDS}</span>)</a></p>
+//     ${adUnit()}
+//     <p><a href="/job/${esc(j.slug)}">&larr; Back to job details</a></p>
+//     <script>
+//     var n=${APPLY_WAIT_SECONDS},go=document.getElementById('go');
+//     var t=setInterval(function(){n--;if(n<=0){clearInterval(t);go.removeAttribute('aria-disabled');go.textContent='Continue to application';}else{document.getElementById('n').textContent=n;}},1000);
+//     </script>`,
+//     { noindex: true, sides: true }));
+// });
 
 app.get('/privacy', (req, res) => res.send(layout('Privacy Policy', `
 <h1>Privacy Policy</h1>
