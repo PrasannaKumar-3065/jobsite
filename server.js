@@ -10,6 +10,8 @@ const express = require('express');
 const Database = require('better-sqlite3');
 const crypto = require('crypto');
 const path = require('path');
+const multer = require('multer');
+const XLSX = require('@e965/xlsx');
 
 const PORT = process.env.PORT || 3000;
 const SITE_NAME = process.env.SITE_NAME || 'MonitorMyWork';
@@ -42,7 +44,9 @@ if (!jobColumns.has('experience_max')) db.exec('ALTER TABLE jobs ADD COLUMN expe
 
 const app = express();
 app.set('trust proxy', 1);
+app.use(express.json({ limit: '2mb' }));
 app.use(express.urlencoded({ extended: false, limit: '200kb' }));
+const importUpload = multer({ storage: multer.memoryStorage(), limits: { fileSize: 5 * 1024 * 1024, files: 1 } });
 
 // ---------- helpers ----------
 const esc = (s = '') => String(s).replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
@@ -70,6 +74,69 @@ const experienceLabel = (min, max) => {
   if (lower && upper) return `${lower}–${upper} years`;
   if (lower) return `${lower}+ years`;
   return `Up to ${upper} years`;
+};
+const IMPORT_HEADERS = ['Job title', 'Company', 'Location', 'Job type', 'Salary', 'Minimum experience', 'Maximum experience', 'Job details', 'Apply link'];
+const normalizeImportJob = source => {
+  const errors = [];
+  const text = value => String(value ?? '').trim();
+  const experience = (value, label) => {
+    if (value === '' || value === null || value === undefined) return 0;
+    const number = Number(value);
+    if (!Number.isInteger(number) || number < 0 || number > 50) {
+      errors.push(`${label} must be a whole number from 0 to 50.`);
+      return 0;
+    }
+    return number;
+  };
+  const job = {
+    title: text(source.title),
+    company: text(source.company),
+    location: text(source.location),
+    job_type: text(source.job_type),
+    salary: text(source.salary),
+    experience_min: experience(source.experience_min, 'Minimum experience'),
+    experience_max: experience(source.experience_max, 'Maximum experience'),
+    description: text(source.description),
+    apply_url: text(source.apply_url)
+  };
+  if (!job.title) errors.push('Job title is required.');
+  if (job.title.length > 150) errors.push('Job title must be 150 characters or fewer.');
+  if (!job.company) errors.push('Company is required.');
+  if (job.company.length > 100) errors.push('Company must be 100 characters or fewer.');
+  if (job.location.length > 100) errors.push('Location must be 100 characters or fewer.');
+  if (job.job_type.length > 50) errors.push('Job type must be 50 characters or fewer.');
+  if (job.salary.length > 80) errors.push('Salary must be 80 characters or fewer.');
+  if (!job.description) errors.push('Job details are required.');
+  if (job.description.length > 10000) errors.push('Job details must be 10,000 characters or fewer.');
+  if (!/^https?:\/\/\S+$/i.test(job.apply_url)) errors.push('Apply link must be a valid http(s) URL.');
+  if (job.experience_max && job.experience_min > job.experience_max) errors.push('Maximum experience must be greater than or equal to minimum experience.');
+  return { job, errors };
+};
+const parseJobSpreadsheet = (buffer, filename) => {
+  const extension = path.extname(filename).toLowerCase();
+  if (!['.xls', '.xlsx', '.csv'].includes(extension)) throw new Error('Choose an .xls, .xlsx, or .csv file.');
+  const workbook = XLSX.read(buffer, { type: 'buffer', sheetRows: 102 });
+  const firstSheet = workbook.Sheets[workbook.SheetNames[0]];
+  if (!firstSheet) throw new Error('The file does not contain a worksheet.');
+  const matrix = XLSX.utils.sheet_to_json(firstSheet, { header: 1, defval: '', blankrows: false, raw: true });
+  const headers = (matrix[0] || []).slice(0, IMPORT_HEADERS.length).map(value => String(value).replace(/^\uFEFF/, '').trim().toLowerCase());
+  if (!IMPORT_HEADERS.every((header, index) => headers[index] === header.toLowerCase())) {
+    throw new Error(`The first row must contain these columns in order: ${IMPORT_HEADERS.join(', ')}.`);
+  }
+  const dataRows = matrix.slice(1).filter(row => row.some(value => String(value ?? '').trim() !== ''));
+  if (!dataRows.length) throw new Error('The file has no job rows to preview.');
+  if (dataRows.length > 100) throw new Error('A file can contain at most 100 job rows.');
+  return dataRows.map((cells, index) => {
+    const [title, company, location, job_type, salary, experience_min, experience_max, description, apply_url] = cells;
+    const { job, errors } = normalizeImportJob({ title, company, location, job_type, salary, experience_min, experience_max, description, apply_url });
+    return { ...job, errors, row: index + 2 };
+  });
+};
+const saveJobRecord = job => {
+  const slug = `${slugify(job.title + '-' + job.company) || 'job'}-${crypto.randomBytes(3).toString('hex')}`;
+  db.prepare('INSERT INTO jobs (slug,title,company,location,job_type,salary,experience_min,experience_max,description,apply_url) VALUES (?,?,?,?,?,?,?,?,?,?)')
+    .run(slug, job.title, job.company, job.location, job.job_type, job.salary, job.experience_min, job.experience_max, job.description, job.apply_url);
+  return slug;
 };
 
 // ---------- templates ----------
@@ -211,6 +278,27 @@ textarea{min-height:200px}
 button{font-family:inherit}
 button:not(.btn){background:var(--accent);color:#fff;border:1px solid var(--accent);border-radius:8px;padding:8px 12px;font:600 13px/1.3 var(--sans);cursor:pointer;transition:background .18s ease,border-color .18s ease}
 button:not(.btn):hover{background:var(--accent-dark);border-color:var(--accent-dark)}
+.admin-actions{display:flex;align-items:center;flex-wrap:wrap;gap:10px}
+.admin-actions input[type=file]{display:none}
+.import-dialog{width:min(900px,calc(100vw - 28px));max-width:none;max-height:min(88vh,900px);padding:24px;border:1px solid var(--line);border-radius:10px;color:var(--ink);background:var(--surface);box-shadow:0 24px 80px rgba(16,46,78,.25)}
+.import-dialog::backdrop{background:rgba(16,46,78,.58)}
+.import-dialog-head{display:flex;align-items:flex-start;justify-content:space-between;gap:18px}
+.import-dialog-head h2{margin-bottom:0}
+.import-select-row{position:sticky;top:0;z-index:1;display:flex;align-items:center;justify-content:space-between;gap:16px;padding:12px 0;background:var(--surface);border-bottom:1px solid var(--line)}
+.import-select-row label{display:flex;align-items:center;gap:8px;margin:0;font-size:14px}
+.import-select-row input,.import-choice input{width:auto;margin:0;accent-color:var(--accent)}
+.import-rows{display:grid;gap:10px;margin:12px 0}
+.import-row{padding:14px;border:1px solid var(--line);border-radius:8px}
+.import-choice{display:flex;align-items:center;gap:9px;margin:0;font-size:15px}
+.import-fields{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:8px 18px;margin:12px 0 0}
+.import-field{min-width:0}
+.import-field dt{color:var(--muted);font-size:11px;font-weight:700;text-transform:uppercase}
+.import-field dd{margin:2px 0 0;overflow-wrap:anywhere;white-space:pre-wrap}
+.import-field-wide{grid-column:1/-1}
+.import-errors{margin:10px 0 0;padding:10px 12px;background:#f7e8df;border:1px solid #e5bda7;border-radius:8px;color:#74452d;font-size:13px}
+.import-errors ul{margin:0;padding-left:18px}
+.import-footer{display:flex;justify-content:flex-end;gap:10px;padding-top:14px;border-top:1px solid var(--line)}
+@media(max-width:767px){.import-dialog{padding:17px}.import-fields{grid-template-columns:1fr}.import-field-wide{grid-column:auto}.import-footer{flex-direction:column-reverse}.import-footer .btn{width:100%}}
 footer{border-top:1px solid var(--line);background:#edf1f6;padding:24px 0;font-size:13px;color:var(--muted)}
 footer .wrap{display:flex;justify-content:space-between;align-items:center;gap:16px;flex-wrap:wrap}
 footer a{color:var(--ink-soft)}
@@ -421,16 +509,206 @@ const adminForm = (req, extra = '') => {
     <label>Maximum experience (years)</label><input name="experience_max" type="number" min="0" max="50" placeholder="Optional — use 0 for no maximum">
     <label>Job details *</label><textarea name="description" required></textarea>
     <label>Apply link * (where Apply now finally sends people)</label><input name="apply_url" type="url" required placeholder="https://...">
-    <p><button class="btn" type="submit">Publish job</button></p>
+    <div class="admin-actions">
+      <button class="btn" type="submit">Publish job</button>
+      <button class="btn btn-secondary" id="job-import-open" type="button">Upload spreadsheet</button>
+      <input id="job-import-file" type="file" accept=".xls,.xlsx,.csv">
+    </div>
   </form>
+  <p id="job-import-status" class="meta" role="status" aria-live="polite"></p>
+  <dialog id="job-import-dialog" class="import-dialog" data-preview-url="${esc(ADMIN_PATH)}/jobs/import/preview" data-save-url="${esc(ADMIN_PATH)}/jobs/import/save" data-admin-url="${esc(ADMIN_PATH)}" aria-labelledby="job-import-title">
+    <div class="import-dialog-head"><div><p class="eyebrow">Spreadsheet import</p><h2 id="job-import-title">Review job rows</h2></div><button class="btn btn-secondary" id="job-import-close" type="button">Close</button></div>
+    <p id="job-import-caption" class="meta"></p>
+    <div class="import-select-row"><label><input id="job-import-all" type="checkbox"> Select all valid jobs</label><span id="job-import-count" class="meta"></span></div>
+    <div id="job-import-rows" class="import-rows"></div>
+    <div class="import-footer"><button class="btn btn-secondary" id="job-import-cancel" type="button">Cancel</button><button class="btn" id="job-import-save" type="button" disabled>Save selected jobs</button></div>
+  </dialog>
+  <script>
+  (() => {
+    const dialog = document.getElementById('job-import-dialog');
+    const fileInput = document.getElementById('job-import-file');
+    const openButton = document.getElementById('job-import-open');
+    const rowsContainer = document.getElementById('job-import-rows');
+    const status = document.getElementById('job-import-status');
+    const allCheckbox = document.getElementById('job-import-all');
+    const countLabel = document.getElementById('job-import-count');
+    const saveButton = document.getElementById('job-import-save');
+    let previewRows = [];
+
+    openButton.addEventListener('click', () => fileInput.click());
+    document.getElementById('job-import-close').addEventListener('click', () => dialog.close());
+    document.getElementById('job-import-cancel').addEventListener('click', () => dialog.close());
+
+    function updateSelection() {
+      const choices = Array.from(rowsContainer.querySelectorAll('.import-choice input:not(:disabled)'));
+      const selected = choices.filter(choice => choice.checked);
+      allCheckbox.checked = choices.length > 0 && selected.length === choices.length;
+      countLabel.textContent = selected.length + ' selected';
+      saveButton.disabled = selected.length === 0;
+      saveButton.textContent = 'Save selected jobs (' + selected.length + ')';
+    }
+
+    function addField(container, label, value, wide = false) {
+      const field = document.createElement('div');
+      field.className = 'import-field' + (wide ? ' import-field-wide' : '');
+      const term = document.createElement('dt');
+      term.textContent = label;
+      const detail = document.createElement('dd');
+      detail.textContent = value || 'Not provided';
+      field.append(term, detail);
+      container.append(field);
+    }
+
+    function showPreview(result) {
+      previewRows = result.rows;
+      rowsContainer.replaceChildren();
+      document.getElementById('job-import-caption').textContent = result.fileName + ': ' + previewRows.length + ' job rows. Invalid rows are marked and cannot be selected.';
+      previewRows.forEach((job, index) => {
+        const card = document.createElement('article');
+        card.className = 'import-row';
+        const heading = document.createElement('label');
+        heading.className = 'import-choice';
+        const checkbox = document.createElement('input');
+        checkbox.type = 'checkbox';
+        checkbox.checked = job.errors.length === 0;
+        checkbox.disabled = job.errors.length > 0;
+        checkbox.dataset.index = String(index);
+        checkbox.addEventListener('change', updateSelection);
+        const title = document.createElement('span');
+        title.textContent = 'Row ' + job.row + ': ' + (job.title || 'Untitled job');
+        heading.append(checkbox, title);
+        card.append(heading);
+
+        const fields = document.createElement('dl');
+        fields.className = 'import-fields';
+        addField(fields, 'Job title', job.title);
+        addField(fields, 'Company', job.company);
+        addField(fields, 'Location', job.location);
+        addField(fields, 'Job type', job.job_type);
+        addField(fields, 'Salary', job.salary);
+        addField(fields, 'Minimum experience', String(job.experience_min));
+        addField(fields, 'Maximum experience', String(job.experience_max));
+        addField(fields, 'Job details', job.description, true);
+        addField(fields, 'Apply link', job.apply_url, true);
+        card.append(fields);
+
+        if (job.errors.length) {
+          const errorBox = document.createElement('div');
+          errorBox.className = 'import-errors';
+          const errorList = document.createElement('ul');
+          job.errors.forEach(message => {
+            const item = document.createElement('li');
+            item.textContent = message;
+            errorList.append(item);
+          });
+          errorBox.append(errorList);
+          card.append(errorBox);
+        }
+        rowsContainer.append(card);
+      });
+      allCheckbox.checked = previewRows.every(job => job.errors.length === 0);
+      updateSelection();
+      dialog.showModal();
+    }
+
+    fileInput.addEventListener('change', async () => {
+      const file = fileInput.files[0];
+      if (!file) return;
+      status.textContent = 'Reading ' + file.name + '...';
+      openButton.disabled = true;
+      const upload = new FormData();
+      upload.append('jobFile', file);
+      try {
+        const response = await fetch(dialog.dataset.previewUrl, { method: 'POST', body: upload });
+        const result = await response.json();
+        if (!response.ok) throw new Error(result.error || 'Could not read this file.');
+        showPreview(result);
+        status.textContent = '';
+      } catch (error) {
+        status.textContent = error.message || 'Could not read this file.';
+      } finally {
+        openButton.disabled = false;
+        fileInput.value = '';
+      }
+    });
+
+    allCheckbox.addEventListener('change', () => {
+      rowsContainer.querySelectorAll('.import-choice input:not(:disabled)').forEach(choice => { choice.checked = allCheckbox.checked; });
+      updateSelection();
+    });
+
+    saveButton.addEventListener('click', async () => {
+      const selected = Array.from(rowsContainer.querySelectorAll('.import-choice input:checked')).map(choice => previewRows[Number(choice.dataset.index)]);
+      if (!selected.length) return;
+      saveButton.disabled = true;
+      status.textContent = 'Saving selected jobs...';
+      try {
+        const response = await fetch(dialog.dataset.saveUrl, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ jobs: selected })
+        });
+        const result = await response.json();
+        if (!response.ok) throw new Error(result.error || 'Could not save the selected jobs.');
+        window.location.assign(dialog.dataset.adminUrl + '?imported=' + encodeURIComponent(result.saved));
+      } catch (error) {
+        status.textContent = error.message || 'Could not save the selected jobs.';
+        updateSelection();
+      }
+    });
+  })();
+  </script>
   <h2>Recent jobs</h2>
   ${jobs.map(j => `<div class="card"><a href="/job/${esc(j.slug)}">${esc(j.title)}</a>
     <form method="post" action="${ADMIN_PATH}/delete/${j.id}" style="display:inline;float:right" onsubmit="return confirm('Delete this job?')"><button type="submit">Delete</button></form></div>`).join('') || '<p>None yet.</p>'}
   <p><a href="${ADMIN_PATH}/logout">Log out</a></p>`, { noindex: true });
 };
 
+const importUploadMiddleware = (req, res, next) => importUpload.single('jobFile')(req, res, error => {
+  if (!error) return next();
+  const message = error instanceof multer.MulterError && error.code === 'LIMIT_FILE_SIZE'
+    ? 'File must be 5 MB or smaller.'
+    : 'Could not upload this file. Choose one .xls, .xlsx, or .csv file.';
+  res.status(400).json({ error: message });
+});
+
+app.post(`${ADMIN_PATH}/jobs/import/preview`, requireAdmin, importUploadMiddleware, (req, res) => {
+  if (!req.file) return res.status(400).json({ error: 'Choose an .xls, .xlsx, or .csv file.' });
+  try {
+    const rows = parseJobSpreadsheet(req.file.buffer, req.file.originalname);
+    res.json({ fileName: path.basename(req.file.originalname), rows });
+  } catch (error) {
+    res.status(400).json({ error: error.message || 'Could not read this spreadsheet.' });
+  }
+});
+
+app.post(`${ADMIN_PATH}/jobs/import/save`, requireAdmin, (req, res) => {
+  const requestedJobs = req.body && req.body.jobs;
+  if (!Array.isArray(requestedJobs) || requestedJobs.length < 1 || requestedJobs.length > 100) {
+    return res.status(400).json({ error: 'Select between 1 and 100 valid job rows.' });
+  }
+  const validated = requestedJobs.map(normalizeImportJob);
+  const invalidIndex = validated.findIndex(result => result.errors.length);
+  if (invalidIndex !== -1) {
+    return res.status(400).json({ error: `Row ${invalidIndex + 1}: ${validated[invalidIndex].errors.join(' ')}` });
+  }
+  try {
+    const saveBatch = db.transaction(jobs => jobs.forEach(saveJobRecord));
+    saveBatch(validated.map(result => result.job));
+    res.json({ saved: validated.length });
+  } catch (error) {
+    res.status(500).json({ error: 'The selected jobs could not be saved. No rows were imported.' });
+  }
+});
+
 app.get(ADMIN_PATH, (req, res) => {
-  if (isAdmin(req)) return res.send(adminForm(req));
+  if (isAdmin(req)) {
+    const count = Number.parseInt(req.query.imported, 10);
+    const notice = Number.isInteger(count) && count > 0
+      ? `<div class="notice">${count} ${count === 1 ? 'job was' : 'jobs were'} imported successfully.</div>`
+      : '';
+    return res.send(adminForm(req, notice));
+  }
   res.send(layout('Admin login', `<h1>Admin login</h1>
     ${req.query.e ? '<div class="err">Wrong password.</div>' : ''}
     <form method="post" action="${ADMIN_PATH}/login"><label>Password</label><input type="password" name="password" required autofocus>
